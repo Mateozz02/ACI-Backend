@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.env
+data/receipts/
+*.sqlite
+qrcode.png
+
+CLAUDE.md
+AGENTS.md
+.env.example
