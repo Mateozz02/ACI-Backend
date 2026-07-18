@@ -1,10 +1,11 @@
 from uuid import UUID
+import os
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.models.models import Order
+from src.models.models import Order, OrderStatus, Store
 
 
 class OrderService:
@@ -62,6 +63,27 @@ class OrderService:
         for key, value in kwargs.items():
             if value is not None:
                 setattr(order, key, value)
+        await self.db.commit()
+        await self.db.refresh(order)
+        return order
+
+    async def upload_receipt(self, order_id: UUID, file_bytes: bytes) -> Order | None:
+        order = await self.get_by_id(order_id)
+        if not order:
+            return None
+
+        result = await self.db.execute(select(Store).where(Store.id == order.store_id))
+        store = result.scalar_one_or_none()
+        slug = store.slug if store else "unknown"
+
+        folder = f"data/receipts/{slug}"
+        os.makedirs(folder, exist_ok=True)
+
+        path = f"{folder}/{order_id}.jpg"
+        with open(path, "wb") as f:
+            f.write(file_bytes)
+
+        order.status = OrderStatus.PAYMENT_RECEIVED
         await self.db.commit()
         await self.db.refresh(order)
         return order

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException,UploadFile,File, Depends
 from typing import Optional
 from uuid import UUID
 
@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database import get_db
 from src.schemas.schemas import OrderCreate, OrderUpdate, OrderResponse, OrderDetailResponse
 from src.services.orders import OrderService
+
 
 router = APIRouter(tags=["orders"])
 
@@ -66,3 +67,16 @@ async def get_orders_by_phone(
 ):
     svc = OrderService(db)
     return await svc.list_by_phone(phone, store_id=store_id, skip=skip, limit=limit)
+
+@router.post("/{order_id}/receipt")
+async def upload_receipt(
+    order_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    svc = OrderService(db)
+    contents = await file.read()
+    order = await svc.upload_receipt(order_id, contents)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return {"status": "ok", "order_id": str(order_id), "new_status": order.status.value}
