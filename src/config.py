@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     opencode_base_url: str = "https://opencode.ai/zen/v1"
     model_name: str = "deepseek-v4-flash-free"
 
+    jwt_secret_key: str = "dev-secret-change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_days: int = 7
+
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     debug: bool = True

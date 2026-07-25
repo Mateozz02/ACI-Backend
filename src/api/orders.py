@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database import get_db
 from src.schemas.schemas import OrderCreate, OrderUpdate, OrderResponse, OrderDetailResponse
 from src.services.orders import OrderService
+from src.api.deps import get_current_user
 
 
 router = APIRouter(tags=["orders"])
@@ -16,18 +17,23 @@ router = APIRouter(tags=["orders"])
 async def create_order(
     order: OrderCreate,
     db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
 ):
     svc = OrderService(db)
-    return await svc.create(**order.model_dump())
+    try:
+        return await svc.create(user_id=UUID(user_id), **order.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/{order_id}", response_model=OrderDetailResponse)
 async def get_order(
     order_id: UUID,
     db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
 ):
     svc = OrderService(db)
-    order = await svc.get_by_id(order_id)
+    order = await svc.get_by_id(order_id, user_id=UUID(user_id))
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     return order
@@ -39,9 +45,10 @@ async def list_orders_by_store(
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
 ):
     svc = OrderService(db)
-    return await svc.list_by_store(store_id, skip=skip, limit=limit)
+    return await svc.list_by_store(store_id, user_id=UUID(user_id), skip=skip, limit=limit)
 
 
 @router.patch("/{order_id}", response_model=OrderResponse)
@@ -49,9 +56,10 @@ async def update_order(
     order_id: UUID,
     order_update: OrderUpdate,
     db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
 ):
     svc = OrderService(db)
-    order = await svc.update(order_id, **order_update.model_dump(exclude_unset=True))
+    order = await svc.update(order_id, user_id=UUID(user_id), **order_update.model_dump(exclude_unset=True))
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     return order
@@ -64,19 +72,21 @@ async def get_orders_by_phone(
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
 ):
     svc = OrderService(db)
-    return await svc.list_by_phone(phone, store_id=store_id, skip=skip, limit=limit)
+    return await svc.list_by_phone(phone, user_id=UUID(user_id), store_id=store_id, skip=skip, limit=limit)
 
 @router.post("/{order_id}/receipt")
 async def upload_receipt(
     order_id: UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user),
 ):
     svc = OrderService(db)
     contents = await file.read()
-    order = await svc.upload_receipt(order_id, contents)
+    order = await svc.upload_receipt(order_id, user_id=UUID(user_id), file_bytes=contents)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     return {"status": "ok", "order_id": str(order_id), "new_status": order.status.value}

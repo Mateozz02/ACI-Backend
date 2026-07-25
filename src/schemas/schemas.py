@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-
+"Product"
 class ProductBase(BaseModel):
     name: str
     description: Optional[str] = None
@@ -36,7 +36,7 @@ class ProductResponse(ProductBase):
     class Config:
         from_attributes = True
 
-
+"Store"
 class StoreBase(BaseModel):
     name: str
     slug: Optional[str] = None
@@ -46,6 +46,7 @@ class StoreBase(BaseModel):
 
 
 class StoreCreate(StoreBase):
+    user_id: Optional[UUID] = None
     greeting_message: Optional[str] = None
     payment_instructions: Optional[str] = None
     cancellation_policy: Optional[str] = None
@@ -74,7 +75,7 @@ class StoreResponse(StoreBase):
     class Config:
         from_attributes = True
 
-
+"Order"
 class OrderItemBase(BaseModel):
     product_name: str
     quantity: float
@@ -140,3 +141,29 @@ class ParsedOrderItem(BaseModel):
 
 class ParsedOrder(BaseModel):
     items: list[ParsedOrderItem]
+
+"User"
+class UserCreate(BaseModel):
+    email: str
+    password: str
+    name: str
+
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class UserResponse(BaseModel):
+    id: UUID
+    email: str
+    name: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

@@ -5,14 +5,28 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from src.database import async_session_maker, init_db
-from src.models.models import Store, Product, Order, OrderItem, OrderStatus
+from src.models.models import User, Store, Product, Order, OrderItem, OrderStatus
+from src.services.auth import hash_password
 
 
 async def seed():
     await init_db()
 
     async with async_session_maker() as db:
-        # Buscar tienda existente o crear nueva
+        # Crear usuario demo
+        result = await db.execute(select(User).where(User.email == "admin@orderflow.com"))
+        user = result.scalar_one_or_none()
+        if not user:
+            user = User(email="admin@orderflow.com", password_hash=hash_password("admin123"), name="Admin")
+            db.add(user)
+            await db.commit()
+            await db.refresh(user)
+            print(f"Usuario creado: {user.email}")
+        else:
+            print(f"Usuario ya existe: {user.email}")
+        user_id = user.id
+
+        # Crear tienda
         result = await db.execute(select(Store).where(Store.name == "Carniceria El Corte"))
         store = result.scalar_one_or_none()
 
@@ -21,6 +35,7 @@ async def seed():
             print(f"Tienda ya existe: {store_id}")
         else:
             store = Store(name="Carniceria El Corte", phone="573001111111",
+                          user_id=user_id,
                           greeting_message="Bienvenido a Carniceria El Corte!",
                           payment_instructions="Transferencia CBU 1234567890 o efectivo al retirar.",
                           cancellation_policy="Cancela con 24hs de anticipacion.")

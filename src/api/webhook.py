@@ -2,8 +2,13 @@ from fastapi import APIRouter, Request, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import select
 
 from src.config import get_settings
+from src.database import async_session_maker
+from src.models.models import Store
 from src.services.agent import process_message
 from src.services.openwa import openwa_service
 
@@ -60,6 +65,15 @@ async def receive_openwa_webhook(
         return {"status": "ignored", "event": event}
 
 
+async def _resolve_store_id() -> UUID | None:
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Store.id).where(Store.is_active == True).limit(1)
+        )
+        row = result.scalar_one_or_none()
+        return row
+
+
 async def handle_message(data: dict):
     message = OpenWAMessage(
         session=data.get("session", ""),
@@ -79,10 +93,16 @@ async def handle_message(data: dict):
 
     print(f"[WEBHOOK] Message from {phone}: {message.text}")
 
+    store_id = await _resolve_store_id()
+    if store_id is None:
+        print("[WEBHOOK] No active store found, skipping")
+        return {"status": "no_store"}
+
     if message.text:
         result = await process_message(
             phone=phone,
             message=message.text,
+            store_id=store_id,
         )
 
         if result.get("response"):
@@ -92,6 +112,7 @@ async def handle_message(data: dict):
         return {
             "status": "processed",
             "phone": phone,
+            "store_id": str(store_id),
             "intent": result.get("intent"),
             "response": result.get("response"),
             "parsed_items": result.get("parsed_items"),
@@ -100,5 +121,6 @@ async def handle_message(data: dict):
     return {
         "status": "received_no_text",
         "phone": phone,
+        "store_id": str(store_id),
         "hasMedia": message.hasMedia,
     }
