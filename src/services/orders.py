@@ -1,6 +1,8 @@
 from uuid import UUID
 import os
 
+import aiofiles
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -92,8 +94,8 @@ class OrderService:
         os.makedirs(folder, exist_ok=True)
 
         path = f"{folder}/{order_id}.jpg"
-        with open(path, "wb") as f:
-            f.write(file_bytes)
+        async with aiofiles.open(path, "wb") as f:
+            await f.write(file_bytes)
 
         order.status = OrderStatus.PAYMENT_RECEIVED
         await self.db.commit()

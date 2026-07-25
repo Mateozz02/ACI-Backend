@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 "Product"
 class ProductBase(BaseModel):
@@ -50,17 +50,18 @@ class StoreCreate(StoreBase):
     greeting_message: Optional[str] = None
     payment_instructions: Optional[str] = None
     cancellation_policy: Optional[str] = None
+    openwa_session_name: Optional[str] = None
 
 
 class StoreUpdate(BaseModel):
     name: Optional[str] = None
-    slug: Optional[str] = None
     address: Optional[str] = None
     description: Optional[str] = None
     greeting_message: Optional[str] = None
     payment_instructions: Optional[str] = None
     cancellation_policy: Optional[str] = None
     is_active: Optional[bool] = None
+    openwa_session_name: Optional[str] = None
 
 
 class StoreResponse(StoreBase):
@@ -68,6 +69,7 @@ class StoreResponse(StoreBase):
     greeting_message: Optional[str] = None
     payment_instructions: Optional[str] = None
     cancellation_policy: Optional[str] = None
+    openwa_session_name: Optional[str] = None
     is_active: bool
     created_at: datetime
     updated_at: Optional[datetime] = None

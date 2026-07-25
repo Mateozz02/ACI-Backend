@@ -1,21 +1,20 @@
-from datetime import datetime
 from typing import Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-
 
 from src.schemas.schemas import ParsedOrder
 from src.agents.state import OrderState, Intent
 from src.agents.llm import get_llm
 from src.agents.prompts import INTENT_PROMPT, ORDER_PARSE_PROMPT, RESPONSE_PROMPT
 from src.services.embeddings import get_store_context, search_similar_products
+from src.services.receipt import ReceiptService
+from src.utils import clean_llm_json, logger
 
 from sqlalchemy import select
 from src.models.models import Order, OrderStatus, Product
 from src.database import async_session_maker
-
 
 
 def detect_intent(state: OrderState) -> OrderState:
@@ -43,7 +42,7 @@ async def parse_order(state: OrderState) -> OrderState:
     try:
         messages = ORDER_PARSE_PROMPT.format_messages(message=state["message"])
         response = llm.invoke(messages)
-        content = _clean_json(response.content)
+        content = clean_llm_json(response.content)
         parsed = ParsedOrder.model_validate_json(content)
         items = [item.model_dump() for item in parsed.items]
 
@@ -52,12 +51,15 @@ async def parse_order(state: OrderState) -> OrderState:
         total = 0
         for item in items:
             producto = item.get("producto", "")
+            cantidad = item.get("cantidad")
+            if cantidad is None or cantidad <= 0:
+                cantidad = 1
             store_id_str = str(state["store_id"]) if state.get("store_id") else None
             if store_id_str:
-                results = await search_similar_products(producto,store_id_str,limit=1)
+                results = await search_similar_products(producto, store_id_str, limit=1)
                 if results:
                     item["price"] = results[0]["price"]
-                    total += item.get("cantidad",0) * results[0]["price"]
+                    total += cantidad * results[0]["price"]
 
         return {
             **state,
@@ -66,23 +68,15 @@ async def parse_order(state: OrderState) -> OrderState:
             "has_ambiguous": has_ambiguous,
         }
     except Exception as e:
-        print(f"[parse_order] Error: {e}")
+        logger.error(f"[parse_order] Error: {e}")
         return {**state, "parsed_items": None, "total": None, "has_ambiguous": None}
-
-
-def _clean_json(text: str) -> str:
-    """Strip markdown fences from LLM output to extract raw JSON."""
-    text = text.strip()
-    if "```json" in text:
-        text = text.split("```json", 1)[1]
-    if "```" in text:
-        text = text.split("```", 1)[0]
-    return text.strip()
-
 
 
 async def generate_response(state: OrderState) -> OrderState:
     """Generate AI response based on intent"""
+    if state.get("response"):
+        return state
+
     llm = get_llm(temperature=0.8)
 
     history = state.get("conversation_history", [])
@@ -104,13 +98,13 @@ async def generate_response(state: OrderState) -> OrderState:
 
     response = llm.invoke(messages)
     history = state.get("conversation_history", [])
-    history.append({"user":state["message"],"assistant": response.content})
-    return {**state, "response": response.content,"conversation_history":history[-10:]}
+    history.append({"user": state["message"], "assistant": response.content})
+    return {**state, "response": response.content, "conversation_history": history[-10:]}
 
 
 def route_intent(state: OrderState) -> Literal[
     "parse_order", "generate_response", "check_order_status",
-    "cancel_order", "payment_info", "show_catalog",
+    "cancel_order", "payment_info", "show_catalog", "verify_receipt",
 ]:
     if state["intent"] == Intent.ORDER:
         return "parse_order"
@@ -122,6 +116,8 @@ def route_intent(state: OrderState) -> Literal[
         return "payment_info"
     elif state["intent"] == Intent.CATALOG:
         return "show_catalog"
+    elif state["intent"] == Intent.SEND_RECEIPT:
+        return "verify_receipt"
     return "generate_response"
 
 async def check_order_status(state:OrderState) -> OrderState:
@@ -182,13 +178,53 @@ async def show_catalog(state: OrderState) -> OrderState:
         return {**state, "response": "No tengo tienda asignada."}
     async with async_session_maker() as session:
         result = await session.execute(
-            select(Product).where(Product.store_id == store_id, Product.is_available == True)
+            select(Product).where(Product.store_id == store_id, Product.is_available)
         )
         products = result.scalars().all()
     if not products:
         return {**state, "response": "No hay productos disponibles en este momento."}
     lines = [f"- {p.name}: ${p.price}/{p.unit}" for p in products]
     return {**state, "response": "Catalogo disponible:\n\n" + "\n".join(lines)}
+
+
+async def verify_receipt(state: OrderState) -> OrderState:
+    if state["intent"] != Intent.SEND_RECEIPT:
+        return {**state}
+
+    image_bytes = state.get("image_bytes")
+    if not image_bytes:
+        return {**state, "response": "No recibí la imagen del comprobante. Intentá de nuevo."}
+
+    phone = state["phone"]
+    store_id = state.get("store_id")
+
+    async with async_session_maker() as session:
+        result = await session.execute(
+            select(Order)
+            .where(
+                Order.customer_phone == phone,
+                Order.store_id == store_id,
+                Order.status.in_([OrderStatus.AWAITING_PAYMENT, OrderStatus.PAYMENT_RECEIVED]),
+            )
+            .order_by(Order.created_at.desc())
+            .limit(1)
+        )
+        order = result.scalar_one_or_none()
+
+        if not order:
+            return {**state, "response": "No tenés pedidos pendientes de pago."}
+
+        svc = ReceiptService(session)
+        path = await svc.save_image(store_id, order, image_bytes)
+
+        try:
+            extracted = await svc.analyze(image_bytes)
+        except Exception as e:
+            logger.error(f"[verify_receipt] Gemini analyze error: {e}")
+            return {**state, "response": "No pude leer el comprobante. ¿Podés reenviarlo más claro?", "image_path": path}
+
+        response_text = await svc.verify(order, extracted)
+        return {**state, "response": response_text, "image_path": path}
 
 
 def build_order_graph():
@@ -202,6 +238,7 @@ def build_order_graph():
     graph.add_node("cancel_order", cancel_order)
     graph.add_node("payment_info", payment_info)
     graph.add_node("show_catalog", show_catalog)
+    graph.add_node("verify_receipt", verify_receipt)
 
     graph.set_entry_point("detect_intent")
 
@@ -215,6 +252,7 @@ def build_order_graph():
             "cancel_order": "cancel_order",
             "payment_info": "payment_info",
             "show_catalog": "show_catalog",
+            "verify_receipt": "verify_receipt",
         },
     )
 
@@ -223,6 +261,7 @@ def build_order_graph():
     graph.add_edge("cancel_order", "generate_response")
     graph.add_edge("payment_info", "generate_response")
     graph.add_edge("show_catalog", "generate_response")
+    graph.add_edge("verify_receipt", "generate_response")
     graph.add_edge("generate_response", END)
 
     return graph.compile(checkpointer=MemorySaver())

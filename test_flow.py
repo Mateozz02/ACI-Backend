@@ -13,8 +13,8 @@ from src.services.agent import process_message
 
 async def seed_demo_store():
     """Crea una tienda demo con productos y politicas"""
-    from src.models.models import Store, Product
-    from src.services.embeddings import generate_embedding
+    from src.models.models import Store, Product, User
+    from src.services.auth import hash_password
 
     await init_db()
 
@@ -24,13 +24,25 @@ async def seed_demo_store():
         await db.execute(text("DELETE FROM products"))
         await db.execute(text("DELETE FROM conversations"))
         await db.execute(text("DELETE FROM stores"))
+        await db.execute(text("DELETE FROM users"))
         await db.commit()
+
+        user = User(
+            email="demo@orderflow.test",
+            password_hash=hash_password("demo123"),
+            name="Demo User",
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
 
         store = Store(
             name="El Corte", phone="573001111111",
             greeting_message="Bienvenido a Carniceria El Corte!",
             payment_instructions="Transferencia al CBU 1234567890 o efectivo al retirar.",
             cancellation_policy="Cancela con 24hs de anticipacion.",
+            user_id=user.id,
+            openwa_session_name="default",
         )
         db.add(store)
         await db.commit()

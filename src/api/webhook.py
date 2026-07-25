@@ -1,16 +1,18 @@
 from fastapi import APIRouter, Request, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
+
+import httpx
 
 from src.config import get_settings
 from src.database import async_session_maker
 from src.models.models import Store
 from src.services.agent import process_message
 from src.services.openwa import openwa_service
+from src.utils import logger
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 settings = get_settings()
@@ -46,9 +48,8 @@ async def receive_openwa_webhook(
     request: Request,
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
 ):
-    if settings.openwa_api_key != "orderflow-api-key-change-in-production":
-        if x_api_key != settings.openwa_api_key:
-            raise HTTPException(status_code=401, detail="Invalid API key")
+    if x_api_key != settings.openwa_api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
 
     try:
         body = await request.json()
@@ -65,12 +66,20 @@ async def receive_openwa_webhook(
         return {"status": "ignored", "event": event}
 
 
-async def _resolve_store_id() -> UUID | None:
+async def _resolve_store_id(session_name: str) -> UUID | None:
     async with async_session_maker() as session:
         result = await session.execute(
-            select(Store.id).where(Store.is_active == True).limit(1)
+            select(Store.id).where(
+                Store.is_active,
+                Store.openwa_session_name == session_name,
+            ).limit(1)
         )
         row = result.scalar_one_or_none()
+        if row is None:
+            result = await session.execute(
+                select(Store.id).where(Store.is_active).limit(1)
+            )
+            row = result.scalar_one_or_none()
         return row
 
 
@@ -91,23 +100,37 @@ async def handle_message(data: dict):
 
     phone = format_phone(message.chatId)
 
-    print(f"[WEBHOOK] Message from {phone}: {message.text}")
+    logger.info(f"[WEBHOOK] Message from {phone}: {message.text}")
 
-    store_id = await _resolve_store_id()
+    store_id = await _resolve_store_id(message.session)
     if store_id is None:
-        print("[WEBHOOK] No active store found, skipping")
+        logger.warning("[WEBHOOK] No active store found, skipping")
         return {"status": "no_store"}
 
-    if message.text:
+    text = message.text or ""
+    image_bytes = None
+
+    if message.hasMedia and message.mediaUrl:
+        logger.info(f"[WEBHOOK] Media detected from {phone}, downloading...")
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(message.mediaUrl)
+            image_bytes = resp.content
+
+    if text or image_bytes:
+        text = text or "RECEIPT"
         result = await process_message(
             phone=phone,
-            message=message.text,
+            message=text,
             store_id=store_id,
+            image_bytes=image_bytes,
         )
 
         if result.get("response"):
-            await openwa_service.send_text(phone, result["response"])
-            print(f"[WEBHOOK] Sent reply to {phone}")
+            try:
+                await openwa_service.send_text(phone, result["response"])
+                logger.info(f"[WEBHOOK] Sent reply to {phone}")
+            except Exception as e:
+                logger.error(f"[WEBHOOK] Failed to send reply: {e}")
 
         return {
             "status": "processed",

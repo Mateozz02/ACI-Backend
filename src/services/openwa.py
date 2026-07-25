@@ -10,7 +10,7 @@ class OpenWAService:
     def __init__(self):
         self.base_url = settings.openwa_api_url
         self.api_key = settings.openwa_api_key
-        self.session_name = "df69e11b-272f-455a-a4f9-1e9250936893"  # session UUID
+        self.session_name = settings.openwa_session_name
 
     def _get_headers(self) -> dict:
         return {

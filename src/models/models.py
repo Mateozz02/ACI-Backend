@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+import re
 from enum import Enum as PyEnum
 
 from pgvector.sqlalchemy import Vector
@@ -11,16 +11,17 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
-    Integer,
     Enum,
     UniqueConstraint,
     Index,
+    event,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from src.database import Base
+from src.services.embeddings import generate_embedding
 
 
 class OrderStatus(str, PyEnum):
@@ -48,6 +49,7 @@ class Store(Base):
     greeting_message = Column(Text, nullable=True)
     payment_instructions = Column(Text, nullable=True)
     cancellation_policy = Column(Text, nullable=True)
+    openwa_session_name = Column(String(255), nullable=True)
 
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -179,19 +181,23 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
 
-from sqlalchemy import event
-from src.services.embeddings import generate_embedding
-import re
-
-
 @event.listens_for(Store, "before_insert")
-@event.listens_for(Store, "before_update")
-def _set_store_slug(mapper, connection, target):
+def _set_store_slug_insert(mapper, connection, target):
     if target.name:
         slug = target.name.lower()
         slug = re.sub(r"[^a-z0-9]+", "-", slug)
         slug = slug.strip("-")
         target.slug = slug
+
+
+@event.listens_for(Store, "before_update")
+def _set_store_slug_update(mapper, connection, target):
+    if target.name:
+        new_slug = target.name.lower()
+        new_slug = re.sub(r"[^a-z0-9]+", "-", new_slug)
+        new_slug = new_slug.strip("-")
+        if new_slug != target.slug:
+            target.slug = new_slug
 
 
 @event.listens_for(Product, "before_insert")

@@ -14,7 +14,8 @@ class StoreService:
                      address: str | None = None, description: str | None = None,
                      greeting_message: str | None = None,
                      payment_instructions: str | None = None,
-                     cancellation_policy: str | None = None) -> Store:
+                     cancellation_policy: str | None = None,
+                     openwa_session_name: str | None = None) -> Store:
         store = Store(
             name=name,
             phone=phone,
@@ -24,6 +25,7 @@ class StoreService:
             greeting_message=greeting_message,
             payment_instructions=payment_instructions,
             cancellation_policy=cancellation_policy,
+            openwa_session_name=openwa_session_name,
         )
         self.db.add(store)
         await self.db.commit()

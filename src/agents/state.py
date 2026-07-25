@@ -12,6 +12,7 @@ class Intent(str, Enum):
     HELP = "help"
     CATALOG = "catalog"
     PAYMENT = "payment"
+    SEND_RECEIPT = "send_receipt"
     UNKNOWN = "unknown"
 
 
@@ -26,4 +27,6 @@ class OrderState(TypedDict):
     response: Optional[str]
     conversation_history: list[dict]
     timestamp: datetime
-    has_ambiguous: Optional[bool] 
+    has_ambiguous: Optional[bool]
+    image_bytes: Optional[bytes]     
+    image_path: Optional[str] 

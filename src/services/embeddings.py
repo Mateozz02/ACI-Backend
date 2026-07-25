@@ -1,6 +1,7 @@
+import asyncio
+
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import async_session_maker
 
@@ -13,16 +14,20 @@ def get_model() -> SentenceTransformer:
         _model = SentenceTransformer("all-MiniLM-L6-v2")
     return _model
 
-def generate_embedding(text:str) -> list[float]:
+def generate_embedding(text: str) -> list[float]:
     model = get_model()
     return model.encode(text).tolist()
 
+
+async def async_generate_embedding(text: str) -> list[float]:
+    return await asyncio.to_thread(generate_embedding, text)
+
 async def search_similar_products(
         query: str,
-        store_id:str,
+        store_id: str,
         limit: int = 5
 ) -> list[dict]:
-    embedding = generate_embedding(query)
+    embedding = await async_generate_embedding(query)
     embedding_str = f"[{','.join(str(v) for v in embedding)}]"
 
     sql = text("""
