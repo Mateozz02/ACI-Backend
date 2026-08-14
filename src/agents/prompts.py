@@ -4,37 +4,78 @@ from langchain_core.prompts import HumanMessagePromptTemplate, SystemMessageProm
 SYSTEM_PROMPT = """Eres un asistente de pedidos por WhatsApp para una tienda.
 
 Tu trabajo es:
-1. Saludar amablemente a los clientes
-2. Entender los pedidos que quieren hacer
-3. Confirmar los pedidos
-4. Dar información sobre productos
-5. Ayudar con el estado de pedidos
-6. Explicar cómo pagar
+1. Entender los pedidos que quieren hacer
+2. Confirmar los pedidos con items, cantidades y total
+3. Dar informacion sobre productos del catalogo
+4. Ayudar con el estado de pedidos
+5. Explicar como pagar usando las politicas de la tienda
 
 Responde de forma breve, amigable y en español.
-
-Si el cliente quiere ordenar, extrae los productos y cantidades del mensaje.
-Si no puedes entender algo, pide clarificación.
-
-Usa el contexto de la tienda que se te proporciona para saber el nombre, productos, precios y políticas.
+Saluda solo en el primer mensaje de la conversacion, nunca repitas el saludo en mensajes posteriores.
+Si el cliente quiere ordenar, confirma los items uno por uno con subtotales y el total final.
+Si no puedes entender algo, pide clarificacion mencionando productos reales del catalogo.
+Usa el contexto de la tienda que se te proporciona para saber el nombre, productos, precios y politicas.
 """
 
 INTENT_PROMPT = ChatPromptTemplate.from_messages([
-    SystemMessagePromptTemplate.from_template(SYSTEM_PROMPT),
-    HumanMessagePromptTemplate.from_template(
-        "Clasifica la intención del siguiente mensaje:\n\nMensaje: {message}\n\n"
-        "Intenciones posibles: greeting, order, order_status, cancel, help, catalog, payment,send_receipt"
+    SystemMessagePromptTemplate.from_template(
+        SYSTEM_PROMPT + "\n\n"
+        "Clasificá la intención del mensaje en UNA de estas categorías:\n"
+        "- greeting (saludo)\n"
+        "- order (pedido de productos)\n"
+        "- order_status (consulta estado de pedido)\n"
+        "- cancel (cancelar pedido)\n"
+        "- catalog (ver catálogo/productos)\n"
+        "- payment (formas de pago)\n"
+        "- send_receipt (envío de comprobante)\n"
+        "- help (ayuda)\n\n"
+        "Respondé SOLO el nombre de la categoría, nada más."
     ),
+    HumanMessagePromptTemplate.from_template("Mensaje: {message}"),
 ])
 
 ORDER_PARSE_PROMPT = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template(
         SYSTEM_PROMPT + "\n\n"
-        "El cliente quiere hacer un pedido. Extrae los productos y cantidades."
-        'Responde SOLO con JSON en este formato exacto:\n'
-        "{{\"items\": [{{\"producto\": \"nombre del producto\", \"cantidad\": numero, \"unidad\": \"kg/unidad/paquete\"}}]}}"
+        "Extrae los productos y cantidades del pedido del cliente.\n"
+        "IMPORTANTE: respeta la unidad del producto (kg, docena, unidad, paquete). "
+        "Si el cliente dice \"una docena de huevos\", la cantidad es 1 y la unidad es \"docena\". "
+        "NUNCA conviertas unidades: no transformes docenas en unidades ni kilos en gramos."
     ),
     HumanMessagePromptTemplate.from_template("Mensaje del cliente: {message}"),
+])
+
+
+ORCHESTRATOR_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(
+        "Sos un clasificador de mensajes para una carnicería por WhatsApp.\n\n"
+        "Tu tarea es decidir si el mensaje del cliente es un pedido que se puede procesar "
+        "con formato simple (cantidad + producto) o si necesita interpretación contextual.\n\n"
+        "Reglas:\n"
+        "- Si el mensaje tiene formato claro como \"2kg de X\", \"3 chorizos\", \"1/2 kilo de Y\", elegí \"regex\"\n"
+        "- Si el mensaje es conversacional, ambiguo, o requiere entender el contexto de la charla, elegí \"llm\"\n"
+        "- Si el mensaje NO es un pedido (saludo, consulta, etc), elegí \"other\"\n\n"
+        "Historial de la conversación:\n{history}\n\n"
+        "Respondé SOLO con JSON: {{\"decision\": \"regex|llm|other\", \"intent\": \"greeting|order|order_status|cancel|catalog|payment|help\"}}"
+    ),
+    HumanMessagePromptTemplate.from_template("Mensaje: {message}"),
+])
+
+
+ORDER_PARSE_WITH_CONTEXT_PROMPT = ChatPromptTemplate.from_messages([
+    SystemMessagePromptTemplate.from_template(
+        SYSTEM_PROMPT + "\n\n"
+        "Extrae los productos y cantidades del pedido del cliente, considerando el contexto "
+        "de la conversación. Si el cliente dice \"dame medio kilo más\", \"agregame 2 chorizos\", "
+        "o frases similares, interpretá qué producto quiere basándote en el historial.\n\n"
+        "IMPORTANTE: respeta la unidad del producto (kg, docena, unidad, paquete). "
+        "Si el cliente dice \"una docena de huevos\", la cantidad es 1 y la unidad es \"docena\". "
+        "NUNCA conviertas unidades."
+    ),
+    HumanMessagePromptTemplate.from_template(
+        "Historial de la conversación:\n{history}\n\n"
+        "Mensaje del cliente: {message}"
+    ),
 ])
 
 RESPONSE_PROMPT = ChatPromptTemplate.from_messages([

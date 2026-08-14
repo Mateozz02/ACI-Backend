@@ -22,10 +22,11 @@ class OrderState(TypedDict):
     message: str
     intent: Intent
     order_id: Optional[UUID]
+    order_message: Optional[str]
     parsed_items: Optional[list[dict]]
     total: Optional[float]
     response: Optional[str]
-    conversation_history: list[dict]
+    conversation_history: str  # plain text history for LLM context
     timestamp: datetime
     has_ambiguous: Optional[bool]
     image_bytes: Optional[bytes]     

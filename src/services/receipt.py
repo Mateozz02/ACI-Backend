@@ -54,11 +54,14 @@ class ReceiptService:
         date = extracted.get("date")
         confidence = extracted.get("confidence", 0)
 
-        if amount is not None and confidence >= 0.2 and abs(amount - float(order.total_amount or 0)) < 0.01:
+        if amount is not None and confidence >= 0.7 and abs(amount - float(order.total_amount or 0)) < 0.01:
             order.status = OrderStatus.VERIFIED
             order.payment_reference = str(ref) if ref else None
             if date:
-                order.payment_date = datetime.fromisoformat(date)
+                try:
+                    order.payment_date = datetime.fromisoformat(date)
+                except ValueError:
+                    logger.warning(f"[verify_receipt] Invalid date format from Gemini: {date}")
             await self.db.commit()
             return f"Pago verificado! Tu pedido #{order.id} por ${amount:.2f} está en proceso."
 

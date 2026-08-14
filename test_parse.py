@@ -1,3 +1,4 @@
+from datetime import datetime
 import asyncio
 from src.agents.order_agent import parse_order
 from src.agents.state import OrderState, Intent
@@ -13,7 +14,9 @@ state: OrderState = {
     "has_ambiguous": None,
     "response": None,
     "conversation_history": [],
-    "timestamp": None,  # o puede ir datetime.now()
+    "timestamp": datetime.now(),
+    "image_bytes": None,
+    "image_path": None,
 }
 
 result = asyncio.run(parse_order(state))

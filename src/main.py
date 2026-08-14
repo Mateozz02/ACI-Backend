@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 
 from src.config import get_settings
 from src.database import init_db
-from src.api import stores, products, orders, webhook, auth, test
+from src.api import stores, products, orders, webhook, auth, test, whatsapp, conversations
 from src.utils import setup_logging, logger
 
 settings = get_settings()
@@ -43,6 +43,8 @@ app.include_router(orders.router, prefix="/api/orders", tags=["orders"])
 app.include_router(webhook.router)
 app.include_router(auth.router)
 app.include_router(test.router)
+app.include_router(whatsapp.router)
+app.include_router(conversations.router)
 
 
 @app.exception_handler(Exception)

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 "Product"
 class ProductBase(BaseModel):
@@ -144,11 +144,28 @@ class ParsedOrderItem(BaseModel):
 class ParsedOrder(BaseModel):
     items: list[ParsedOrderItem]
 
+
+class IntentResponse(BaseModel):
+    """Structured output for intent detection."""
+    intent: str  # LLM returns a string, mapped to Intent enum by detect_intent
+
+
+class OrchestratorDecision(BaseModel):
+    """LLM decides how to process an order message."""
+    decision: str  # "regex", "llm", or "other"
+
 "User"
 class UserCreate(BaseModel):
     email: str
     password: str
     name: str
+
+    @field_validator("password")
+    @classmethod
+    def password_min_length(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        return v
 
 
 class UserLogin(BaseModel):
@@ -165,6 +182,7 @@ class UserResponse(BaseModel):
     id: UUID
     email: str
     name: str
+    tier: str = "free"
     created_at: datetime
 
     class Config:

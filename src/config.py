@@ -12,16 +12,21 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379"
 
-    llm_provider: str = "opencode"
+    llm_provider: str = "gemini"
     opencode_api_key: str = ""
     opencode_base_url: str = "https://opencode.ai/zen/v1"
     model_name: str = "deepseek-v4-flash-free"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash-lite"
+    gemini_model: str = "gemini-3.5-flash-lite"
+    response_style: str = "human"  # "human" (templates variados) or "structured" (formato actual)
 
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_days: int = 7
+
+    def model_post_init(self, _context) -> None:
+        if not self.jwt_secret_key:
+            raise ValueError("JWT_SECRET_KEY must be set in environment")
 
     app_host: str = "0.0.0.0"
     app_port: int = 8000

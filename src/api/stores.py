@@ -1,14 +1,43 @@
 from fastapi import APIRouter, HTTPException, Depends
 from uuid import UUID
 
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import get_db
+from src.models.models import User, Store
 from src.schemas.schemas import StoreCreate, StoreUpdate, StoreResponse
 from src.services.stores import StoreService
 from src.api.deps import get_current_user
 
 router = APIRouter(tags=["stores"])
+
+TIER_LIMITS = {
+    "free": 1,
+    "pro": 3,
+    "enterprise": None,
+}
+
+
+async def _check_store_limit(db: AsyncSession, user_id: UUID) -> None:
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    limit = TIER_LIMITS.get(user.tier)
+    if limit is None:
+        return
+
+    count = await db.execute(
+        select(func.count()).select_from(Store).where(Store.user_id == user_id)
+    )
+    current = count.scalar()
+
+    if current >= limit:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tu plan {user.tier} solo permite {limit} tienda(s). Actualizá tu plan para crear más.",
+        )
 
 
 @router.post("/", response_model=StoreResponse)
@@ -17,6 +46,7 @@ async def create_store(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
+    await _check_store_limit(db, UUID(user_id))
     svc = StoreService(db)
     data = store.model_dump(exclude={"slug"})
     data["user_id"] = user_id
