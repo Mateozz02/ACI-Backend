@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 import asyncio
 
-from src.agents.order_agent import order_agent
+from src.agents.order_agent import get_order_agent
 from src.agents.state import OrderState
 from src.database import async_session_maker
 from src.services.messages import save_message, get_conversation
@@ -67,7 +67,7 @@ async def process_message(
     config = {"configurable": {'thread_id': thread_id}}
 
     async with _llm_semaphore:
-        final_state = await order_agent.ainvoke(initial_state, config=config)
+        final_state = await get_order_agent().ainvoke(initial_state, config=config)
 
     # GUARDAR: respuesta del bot
     response = final_state["response"]
@@ -86,4 +86,5 @@ async def process_message(
         "response": response,
         "parsed_items": final_state.get("parsed_items"),
         "total": final_state.get("total"),
+        "order_id": final_state.get("order_id"),
     }

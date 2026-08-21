@@ -3,13 +3,13 @@ from uuid import uuid4
 import re
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 
 from src.schemas.schemas import ParsedOrder, IntentResponse, OrchestratorDecision
 from src.agents.state import OrderState, Intent
 from src.agents.llm import get_structured_llm
 from src.agents.prompts import INTENT_PROMPT, ORDER_PARSE_PROMPT, ORDER_PARSE_WITH_CONTEXT_PROMPT, ORCHESTRATOR_PROMPT
-from src.services.embeddings import search_product_by_name, search_similar_products
+from src.agents.text_normalize import is_confirm, is_cancel
+from src.services.embeddings import search_product_by_name, search_similar_products, get_store_context
 from src.services.receipt import ReceiptService
 from src.utils import logger
 from src.config import get_settings
@@ -67,6 +67,11 @@ _HUMAN_TEMPLATES = {
         "Disculpá, no entendí bien. ¿Podrías ser más claro?",
         "No estoy seguro de entenderte. ¿Me ayudás con más detalles?",
     ],
+    "llm_error": [
+        "Tuve un problema técnico para procesar tu pedido. ¿Podés repetírmelo?",
+        "Se me complicó procesar eso, ¿lo repetís por favor?",
+        "Uy, tuve un problemita técnico. ¿Me lo volvés a mandar?",
+    ],
 }
 
 
@@ -108,7 +113,7 @@ def _keyword_intent(msg: str) -> Intent | None:
     if any(kw in m for kw in ["cancelar", "cancelá", "cancela", "anular", "anulá",
                                 "anula", "no quiero", "descartar", "borrar pedido"]):
         return Intent.CANCEL
-    if m in ["no", "nop", "nel", "nope"]:
+    if is_cancel(msg):
         return Intent.CANCEL
 
     # HELP
@@ -145,11 +150,15 @@ def detect_intent(state: OrderState) -> OrderState:
         return {**state, "intent": intent}
 
     # Fallback: structured LLM for complex/ambiguous messages
-    llm = get_structured_llm(IntentResponse, temperature=0)
-    messages = INTENT_PROMPT.format_messages(message=state["message"])
-    result = llm.invoke(messages)
+    try:
+        llm = get_structured_llm(IntentResponse, temperature=0)
+        messages = INTENT_PROMPT.format_messages(message=state["message"])
+        result = llm.invoke(messages)
+        intent_str = result.intent.strip().lower()
+    except Exception as e:
+        logger.error(f"[detect_intent] LLM error: {e}")
+        return {**state, "intent": Intent.UNKNOWN}
 
-    intent_str = result.intent.strip().lower()
     # Map Spanish intent names that Gemini sometimes returns
     SPANISH_INTENT_MAP = {
         "saludo": "greeting", "saludar": "greeting", "hola": "greeting", "saludar_al_cliente": "greeting",
@@ -349,10 +358,7 @@ async def orchestrate(state: OrderState) -> OrderState:
         return state
 
     # Confirm/cancel words are always handled by regex
-    msg_lower = state["message"].strip().lower()
-    if msg_lower in {"sí", "si", "dale", "ok", "confirmo", "confirmar", "de una", "obvio", "claro", "bueno", "bien", "perfecto", "listo", "okey"}:
-        return {**state, "orchestrator_decision": "regex"}
-    if msg_lower in {"no", "cancelar", "cancelo", "nop", "nel", "nope"}:
+    if is_confirm(state["message"]) or is_cancel(state["message"]):
         return {**state, "orchestrator_decision": "regex"}
 
     # Ask LLM to decide
@@ -374,11 +380,8 @@ async def parse_order(state: OrderState) -> OrderState:
     if state["intent"] != Intent.ORDER:
         return {**state, "parsed_items": None, "total": None}
 
-    msg_lower = state["message"].strip().lower()
-
     # Short confirmation words with a pending order in state
-    CONFIRM_WORDS = {"sí", "si", "dale", "ok", "confirmo", "confirmar", "de una", "obvio", "claro", "bueno", "bien", "perfecto", "listo", "okey"}
-    if msg_lower in CONFIRM_WORDS and state.get("parsed_items"):
+    if is_confirm(state["message"]) and state.get("parsed_items"):
         items_data = state["parsed_items"]
         total = state.get("total", 0)
         store_id = state.get("store_id")
@@ -426,8 +429,7 @@ async def parse_order(state: OrderState) -> OrderState:
         }
 
     # Short cancellation words
-    CANCEL_WORDS = {"cancelar", "cancelo", "nop", "nel", "nope"}
-    if msg_lower in CANCEL_WORDS and state.get("parsed_items"):
+    if is_cancel(state["message"]) and state.get("parsed_items"):
         return {
             **state,
             "parsed_items": None,
@@ -479,7 +481,13 @@ async def parse_order(state: OrderState) -> OrderState:
             has_ambiguous = any(item.get("ambiguous") for item in items)
         except Exception as e:
             logger.error(f"[parse_order] Error: {e}")
-            return {**state, "parsed_items": None, "total": None, "has_ambiguous": None}
+            return {
+                **state,
+                "parsed_items": state.get("parsed_items"),
+                "total": state.get("total"),
+                "has_ambiguous": state.get("has_ambiguous"),
+                "response": _human_response("llm_error"),
+            }
 
     store_id_str = str(state["store_id"]) if state.get("store_id") else None
 
@@ -730,7 +738,7 @@ async def verify_receipt(state: OrderState) -> OrderState:
         return {**state, "response": response_text, "image_path": path}
 
 
-def build_order_graph():
+def build_order_graph(checkpointer):
     """Build the LangGraph for order processing"""
     graph = StateGraph(OrderState)
 
@@ -769,7 +777,27 @@ def build_order_graph():
     graph.add_edge("verify_receipt", "generate_response")
     graph.add_edge("generate_response", END)
 
-    return graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=checkpointer)
 
 
-order_agent = build_order_graph()
+_order_agent_instance = None
+
+
+def get_order_agent():
+    """Return the compiled order-processing graph, initialized during app startup."""
+    if _order_agent_instance is None:
+        raise RuntimeError(
+            "order_agent not initialized — call init_order_agent() during app startup"
+        )
+    return _order_agent_instance
+
+
+async def init_order_agent(checkpointer):
+    """Build and register the order-processing graph with a given checkpointer.
+
+    Must be called once during app startup (FastAPI lifespan) or by any
+    standalone script that invokes process_message() outside the app.
+    """
+    global _order_agent_instance
+    _order_agent_instance = build_order_graph(checkpointer)
+    return _order_agent_instance

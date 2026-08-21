@@ -33,6 +33,7 @@ async def test_chat(
         "response": result.get("response"),
         "parsed_items": result.get("parsed_items"),
         "total": result.get("total"),
+        "order_id": result.get("order_id"),
     }
 
 
@@ -54,4 +55,5 @@ async def test_receipt(
         "response": result.get("response"),
         "parsed_items": result.get("parsed_items"),
         "total": result.get("total"),
+        "order_id": result.get("order_id"),
     }

@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 
 from src.config import get_settings
 from src.database import init_db
+from src.checkpointer import build_checkpointer
+from src.agents.order_agent import init_order_agent
 from src.api import stores, products, orders, webhook, auth, test, whatsapp, conversations
 from src.utils import setup_logging, logger
 
@@ -18,7 +20,14 @@ async def lifespan(app: FastAPI):
     logger.info("Starting OrderFlow API...")
     await init_db()
     logger.info("Database initialized")
+
+    checkpointer = await build_checkpointer()
+    await init_order_agent(checkpointer)
+    logger.info("Order agent initialized with Redis checkpointer")
+
     yield
+
+    await checkpointer.__aexit__(None, None, None)
     logger.info("Shutting down OrderFlow API")
 
 

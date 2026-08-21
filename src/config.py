@@ -19,10 +19,13 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash-lite"
     response_style: str = "human"  # "human" (templates variados) or "structured" (formato actual)
+    llm_timeout_seconds: float = 15.0
 
     jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expire_days: int = 7
+
+    pending_order_ttl_minutes: int = 720  # 12h — how long a pending unconfirmed order stays in Redis
 
     def model_post_init(self, _context) -> None:
         if not self.jwt_secret_key:

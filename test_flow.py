@@ -9,6 +9,8 @@ from sqlalchemy import text
 
 from src.database import async_session_maker, init_db
 from src.services.agent import process_message
+from src.checkpointer import build_checkpointer
+from src.agents.order_agent import init_order_agent
 
 
 async def seed_demo_store():
@@ -19,6 +21,7 @@ async def seed_demo_store():
     await init_db()
 
     async with async_session_maker() as db:
+        await db.execute(text("DELETE FROM messages"))
         await db.execute(text("DELETE FROM order_items"))
         await db.execute(text("DELETE FROM orders"))
         await db.execute(text("DELETE FROM products"))
@@ -70,6 +73,9 @@ async def run_flow():
     print("1. Sembrando datos demo...")
     store_id = await seed_demo_store()
 
+    checkpointer = await build_checkpointer()
+    await init_order_agent(checkpointer)
+
     phone = "573009876543"
     print(f"\n2. Simulando conversacion con {phone}...\n")
 
@@ -85,6 +91,14 @@ async def run_flow():
     print(f"  Intent: {r['intent']}")
     print(f"  Items: {r['parsed_items']}")
     print(f"  Total: ${r['total']}")
+    print(f"  IA: {r['response'][:120]}\n")
+
+    # -- Mensaje 2b: Confirmacion --
+    print("--- Msg 2b: Confirmar ---")
+    r = await process_message(phone, "dale", store_id=store_id)
+    print(f"  Intent: {r['intent']}")
+    print(f"  Order ID: {r['order_id']}")
+    assert r["order_id"] is not None, "La confirmacion no genero una orden"
     print(f"  IA: {r['response'][:120]}\n")
 
     # -- Mensaje 3: Consulta de pago --
@@ -106,6 +120,8 @@ async def run_flow():
     print(f"  IA: {r['response'][:200]}\n")
 
     print("=== Flujo completo OK ===")
+
+    await checkpointer.__aexit__(None, None, None)
 
 
 if __name__ == "__main__":
