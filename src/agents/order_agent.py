@@ -151,7 +151,7 @@ def detect_intent(state: OrderState) -> OrderState:
 
     # Fallback: structured LLM for complex/ambiguous messages
     try:
-        llm = get_structured_llm(IntentResponse, temperature=0)
+        llm = get_structured_llm(IntentResponse, temperature=0, max_tokens=32)
         messages = INTENT_PROMPT.format_messages(message=state["message"])
         result = llm.invoke(messages)
         intent_str = result.intent.strip().lower()
@@ -346,35 +346,6 @@ def _calculate_regex_confidence(msg: str, parsed_items: list[dict] | None) -> in
 # ---------------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# Orchestrator node — decides regex vs LLM
-# ---------------------------------------------------------------------------
-
-
-async def orchestrate(state: OrderState) -> OrderState:
-    """LLM decides: parse with regex, parse with context, or route to other handler."""
-    intent = state["intent"]
-    if intent != Intent.ORDER:
-        return state
-
-    # Confirm/cancel words are always handled by regex
-    if is_confirm(state["message"]) or is_cancel(state["message"]):
-        return {**state, "orchestrator_decision": "regex"}
-
-    # Ask LLM to decide
-    try:
-        llm = get_structured_llm(OrchestratorDecision, temperature=0)
-        history = state.get("conversation_history", "(sin historial)")
-        messages = ORCHESTRATOR_PROMPT.format_messages(
-            message=state["message"],
-            history=str(history)[:800],
-        )
-        result = llm.invoke(messages)
-        return {**state, "orchestrator_decision": result.decision}
-    except Exception:
-        return {**state, "orchestrator_decision": "regex"}  # safe fallback
-
-
 async def parse_order(state: OrderState) -> OrderState:
     """Parse order items from message and generate confirmation response"""
     if state["intent"] != Intent.ORDER:
@@ -437,19 +408,31 @@ async def parse_order(state: OrderState) -> OrderState:
             "response": _human_response("fallback", fallback="Dale, cancelado. Si querés pedir otra cosa, avisame nomás."),
         }
 
-    # Phase 1B: try regex or LLM based on orchestrator decision
-    decision = state.get("orchestrator_decision", "regex")
-    regex_result = None
+    # Phase 1B: try the free regex parser first — only pay for the LLM router
+    # call when regex confidence isn't high enough to trust on its own.
+    regex_result = _regex_parse_order(state["message"])
+    has_ambiguous = False
+    if regex_result is not None:
+        pre_items, _pre_is_add = regex_result
+        if pre_items is None or _calculate_regex_confidence(state["message"], pre_items) < CONFIDENCE_THRESHOLD:
+            regex_result = None
 
-    if decision == "regex":
-        regex_result = _regex_parse_order(state["message"])
-        if regex_result is not None:
-            items, is_add = regex_result
-            has_ambiguous = False
-            if items is None:
-                regex_result = None
-            elif _calculate_regex_confidence(state["message"], items) < CONFIDENCE_THRESHOLD:
-                regex_result = None
+    if regex_result is None:
+        # Regex wasn't confident — ask the LLM to decide between parsing with
+        # context ("llm") or concluding this isn't really an order ("other").
+        decision = "llm"
+        try:
+            llm = get_structured_llm(OrchestratorDecision, temperature=0, max_tokens=32)
+            history = state.get("conversation_history", "(sin historial)")
+            messages = ORCHESTRATOR_PROMPT.format_messages(
+                message=state["message"],
+                history=str(history)[:800],
+            )
+            result = llm.invoke(messages)
+            if result.decision == "other":
+                decision = "other"
+        except Exception:
+            decision = "llm"  # safe fallback
 
     if regex_result is not None:
         items, is_add = regex_result
@@ -475,7 +458,7 @@ async def parse_order(state: OrderState) -> OrderState:
                 )
             else:
                 messages = ORDER_PARSE_PROMPT.format_messages(message=state["message"])
-            llm = get_structured_llm(ParsedOrder, temperature=0)
+            llm = get_structured_llm(ParsedOrder, temperature=0, max_tokens=400)
             parsed = llm.invoke(messages)
             items = [item.model_dump() for item in parsed.items]
             has_ambiguous = any(item.get("ambiguous") for item in items)
@@ -534,7 +517,7 @@ async def parse_order(state: OrderState) -> OrderState:
 
     # Human-like response generation
     style = get_settings().response_style
-    is_add = state.get("orchestrator_decision") == "regex" and regex_result is not None and is_add
+    is_add = regex_result is not None and is_add
 
     if items_with_price:
         lines = []
@@ -743,7 +726,6 @@ def build_order_graph(checkpointer):
     graph = StateGraph(OrderState)
 
     graph.add_node("detect_intent", detect_intent)
-    graph.add_node("orchestrate", orchestrate)
     graph.add_node("parse_order", parse_order)
     graph.add_node("generate_response", generate_response)
     graph.add_node("check_order_status", check_order_status)
@@ -758,7 +740,7 @@ def build_order_graph(checkpointer):
         "detect_intent",
         route_intent,
         {
-            "parse_order": "orchestrate",    # ORDER → orchestrate → parse_order
+            "parse_order": "parse_order",
             "generate_response": "generate_response",
             "check_order_status": "check_order_status",
             "cancel_order": "cancel_order",
@@ -768,7 +750,6 @@ def build_order_graph(checkpointer):
         },
     )
 
-    graph.add_edge("orchestrate", "parse_order")
     graph.add_edge("parse_order", "generate_response")
     graph.add_edge("check_order_status", "generate_response")
     graph.add_edge("cancel_order", "generate_response")

@@ -19,7 +19,7 @@ Usa el contexto de la tienda que se te proporciona para saber el nombre, product
 
 INTENT_PROMPT = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template(
-        SYSTEM_PROMPT + "\n\n"
+        "Sos un clasificador de intenciones para un asistente de pedidos de WhatsApp.\n\n"
         "Clasificá la intención del mensaje en UNA de estas categorías:\n"
         "- greeting (saludo)\n"
         "- order (pedido de productos)\n"
@@ -36,7 +36,7 @@ INTENT_PROMPT = ChatPromptTemplate.from_messages([
 
 ORDER_PARSE_PROMPT = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template(
-        SYSTEM_PROMPT + "\n\n"
+        "Sos un extractor de pedidos para una tienda que vende por WhatsApp.\n\n"
         "Extrae los productos y cantidades del pedido del cliente.\n"
         "IMPORTANTE: respeta la unidad del producto (kg, docena, unidad, paquete). "
         "Si el cliente dice \"una docena de huevos\", la cantidad es 1 y la unidad es \"docena\". "
@@ -56,7 +56,7 @@ ORCHESTRATOR_PROMPT = ChatPromptTemplate.from_messages([
         "- Si el mensaje es conversacional, ambiguo, o requiere entender el contexto de la charla, elegí \"llm\"\n"
         "- Si el mensaje NO es un pedido (saludo, consulta, etc), elegí \"other\"\n\n"
         "Historial de la conversación:\n{history}\n\n"
-        "Respondé SOLO con JSON: {{\"decision\": \"regex|llm|other\", \"intent\": \"greeting|order|order_status|cancel|catalog|payment|help\"}}"
+        "Respondé SOLO con JSON: {{\"decision\": \"regex|llm|other\"}}"
     ),
     HumanMessagePromptTemplate.from_template("Mensaje: {message}"),
 ])
@@ -64,7 +64,7 @@ ORCHESTRATOR_PROMPT = ChatPromptTemplate.from_messages([
 
 ORDER_PARSE_WITH_CONTEXT_PROMPT = ChatPromptTemplate.from_messages([
     SystemMessagePromptTemplate.from_template(
-        SYSTEM_PROMPT + "\n\n"
+        "Sos un extractor de pedidos para una tienda que vende por WhatsApp.\n\n"
         "Extrae los productos y cantidades del pedido del cliente, considerando el contexto "
         "de la conversación. Si el cliente dice \"dame medio kilo más\", \"agregame 2 chorizos\", "
         "o frases similares, interpretá qué producto quiere basándote en el historial.\n\n"

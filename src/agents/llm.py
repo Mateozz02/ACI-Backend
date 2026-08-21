@@ -24,13 +24,13 @@ def get_chat_llm(temperature: float = 0.7):
     return llm.with_retry(stop_after_attempt=2, wait_exponential_jitter=False)
 
 
-def get_structured_llm(schema: Type[T], temperature: float = 0):
+def get_structured_llm(schema: Type[T], temperature: float = 0, max_tokens: int = 512):
     """LLM with guaranteed structured JSON output matching the given Pydantic schema.
 
     Uses Gemini's native controlled generation — the model cannot return
     anything except valid JSON conforming to the schema.
     """
-    structured = _build_gemini(temperature=temperature, max_tokens=2000).with_structured_output(schema)
+    structured = _build_gemini(temperature=temperature, max_tokens=max_tokens).with_structured_output(schema)
     return structured.with_retry(stop_after_attempt=2, wait_exponential_jitter=False)
 
 

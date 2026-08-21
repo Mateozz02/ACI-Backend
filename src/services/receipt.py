@@ -2,9 +2,11 @@ import base64
 import json
 import os
 from datetime import datetime
+from io import BytesIO
 from uuid import UUID
 
 import aiofiles
+from PIL import Image
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,8 +32,25 @@ class ReceiptService:
             await f.write(image_bytes)
         return path
 
+    def _resize_for_vision(self, image_bytes: bytes, max_side: int = 1600, quality: int = 82) -> bytes:
+        """Achica y recodifica a JPEG para bajar los tokens de entrada de la API de visión."""
+        try:
+            img = Image.open(BytesIO(image_bytes))
+            img = img.convert("RGB")
+            w, h = img.size
+            if max(w, h) > max_side:
+                scale = max_side / max(w, h)
+                img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            out = BytesIO()
+            img.save(out, format="JPEG", quality=quality, optimize=True)
+            return out.getvalue()
+        except Exception as e:
+            logger.warning(f"[ReceiptService] no se pudo redimensionar la imagen, uso original: {e}")
+            return image_bytes
+
     async def analyze(self, image_bytes: bytes) -> dict:
-        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        resized_bytes = self._resize_for_vision(image_bytes)
+        b64 = base64.b64encode(resized_bytes).decode("utf-8")
         vision_llm = get_vision_llm(temperature=0.2)
         from langchain_core.messages import HumanMessage
         msg = HumanMessage(content=[
