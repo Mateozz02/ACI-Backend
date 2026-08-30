@@ -34,7 +34,7 @@ async def seed():
             store_id = store.id
             print(f"Tienda ya existe: {store_id}")
         else:
-            store = Store(name="Carniceria El Corte", phone="573001111111",
+            store = Store(name="Carniceria El Corte", phone="573002222222",
                           user_id=user_id,
                           greeting_message="Bienvenido a Carniceria El Corte!",
                           payment_instructions="Transferencia CBU 1234567890 o efectivo al retirar.",
