@@ -62,6 +62,7 @@ class StoreUpdate(BaseModel):
     cancellation_policy: Optional[str] = None
     is_active: Optional[bool] = None
     openwa_session_name: Optional[str] = None
+    chatbot_enabled: Optional[bool] = None
 
 
 class StoreResponse(StoreBase):
@@ -73,6 +74,7 @@ class StoreResponse(StoreBase):
     is_active: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
+    chatbot_enabled: Optional[bool] = False
 
     class Config:
         from_attributes = True

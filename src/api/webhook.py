@@ -166,7 +166,7 @@ async def handle_message(session_name: str, data: dict):
 
         if result.get("response"):
             try:
-                if store and store.openwa_session_name:
+                if store and store.openwa_session_name and store.chatbot_enabled:
                     wa = OpenWAService(store.openwa_session_name)
                     await wa.send_text(phone, result["response"])
                     logger.info(f"[WEBHOOK] Sent reply to {phone}")

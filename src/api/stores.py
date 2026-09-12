@@ -18,6 +18,7 @@ TIER_LIMITS = {
     "enterprise": None,
 }
 
+CHATBOT_TIERS = {"pro", "enterprise"}
 
 async def _check_store_limit(db: AsyncSession, user_id: UUID) -> None:
     user = await db.get(User, user_id)
@@ -97,6 +98,14 @@ async def update_store(
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user),
 ):
+    if store_update.chatbot_enabled is True:
+        user = await db.get(User, UUID(user_id))
+        if not user or user.tier not in CHATBOT_TIERS:
+            raise HTTPException(
+                status_code=403,
+                detail="Necesitás plan pro o superior para activar el chatbot automático.",
+            )
+
     svc = StoreService(db)
     store = await svc.update(store_id, user_id=UUID(user_id), **store_update.model_dump(exclude_unset=True))
     if not store:

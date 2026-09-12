@@ -38,7 +38,7 @@ async def process_message(
     message: str,
     store_id: UUID | None = None,
     conversation_history: list[dict] | None = None,
-    image_bytes: bytes | None = None,
+    image_bytes: bytes | None = None
 ) -> dict:
     """Process a WhatsApp message through the order agent"""
     # GUARDAR: mensaje entrante del usuario
